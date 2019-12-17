@@ -131,7 +131,10 @@ class LiletoContext(rootContext: BracketWithContent): Bracket() {
     }
 }
 
-class TextContext(private var text: String) : Bracket() {
+// TODO: make it with decorator instead of an interface
+interface CommandContent
+
+class TextContext(private var text: String) : Bracket(), CommandContent {
 
     override fun evaluate(): String = text
 
@@ -157,12 +160,10 @@ class TextContext(private var text: String) : Bracket() {
     }
 }
 
-data class CommandContext(val name: String, val output: Operation, val operations: List<Operation>): Bracket() {
-    init {
-        if (name.isNotBlank()) {
-            globalRegistry[name] = this
-        }
-    }
+private fun Bracket.registerToGlobal(name: String) { if (name.isNotBlank()) Bracket.globalRegistry[name] = this }
+
+data class CommandContext(val name: String = "", val output: Operation, val operations: List<Operation>): Bracket(), CommandContent {
+    init { registerToGlobal(name) }
 
     private constructor(result: CommandParser.CommandEvaluationResult): this(result.name, result.output, result.operations)
 
@@ -233,27 +234,28 @@ data class CommandContext(val name: String, val output: Operation, val operation
             command.content.forEach { content ->
                 if (content is BracketWithContent) {
 
+                    @Suppress("IMPLICIT_CAST_TO_ANY")
                     commandContext[content.getTemporaryRegistryName()] =
-                        when (content.bracket) {
+                        (when (content.bracket) {
                             BracketType.TEXT -> TextContext.parse(content)
                             BracketType.COMMAND -> parse(content)
                             BracketType.CONTAINER -> ContainerContext.parse(content)
                             BracketType.TEMPLATE -> TextContext.parse(content)
                             else -> notSupported()
-                        }
+                        } as Bracket)
                             // Register inner brackets into local registry
                             .also { bracket -> commandContext[content.getTemporaryRegistryName()] = bracket }
-                    }
                 }
-            return commandContext
             }
+
+            return commandContext
+        }
     }
 }
 
-class ContainerContext(): Bracket() {
-    init {
+class ContainerContext(name: String = ""): Bracket(), CommandContent {
+    init { registerToGlobal(name) }
 
-    }
     override fun evaluate(): String {
         TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
     }
@@ -269,7 +271,9 @@ class ContainerContext(): Bracket() {
     }
 }
 
-class TemplateContext(): Bracket() {
+class TemplateContext(name: String = ""): Bracket(), CommandContent {
+    init { registerToGlobal(name) }
+
     override fun evaluate(): String {
         TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
     }
@@ -284,5 +288,3 @@ class TemplateContext(): Bracket() {
         }
     }
 }
-
-// TODO: Lileto variable registry: mapOf<String, Bracket>()
