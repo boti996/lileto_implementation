@@ -97,7 +97,7 @@ fun getBracketType(bracketBuffer: BracketBuffer, which: WhichBracket, peekBracke
  */
 data class BracketWithContent(val bracket: BracketType, var content: MutableList<Any> = mutableListOf()) {
 
-    private val userErrorInfo = UserErrorInfo()
+    val userErrorInfo = UserErrorInfo()
 
     fun open() = bracket.open()
     fun close() = bracket.close()

@@ -130,9 +130,6 @@ class TextContext(private var text: String) : Bracket() {
 
     companion object {
         fun parse(content: BracketWithContent): TextContext = TextContext(content.toString())
-            val pattern = Regex("^\\s*=\\s*(?<name>\\w+)(?:\\s+|,|;)(?:(?<left>\\w+)\\s*(?<operation>\\+|<|=|\\s*:\\s*\\w*\\s*=)\\s*(?<right>\\w+)(?:\\s+|,|;))*outp\\s*=\\s*(?<out>\\w+)\\s*\$")
-
-
     }
 
 }
