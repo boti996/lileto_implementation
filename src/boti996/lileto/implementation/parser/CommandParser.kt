@@ -19,9 +19,9 @@ data class Operation(var op: String? = null, var left: String? = null, var right
 
 object CommandParser {
 
-    enum class OperatorTypes(val pattern: String) {
-        ASSIGN("\\="),
-        DECLARE("\\:$ws${word("type", true)}$ws\\="),
+    enum class OperatorTypes(val pattern: String, val value: List<String>) {
+        ASSIGN("\\=", listOf("=")),
+        DECLARE("\\:$ws${word("type", true)}$ws\\=", listOf(":", "=")),
         CONCATENATE("\\+"),
         INSERT("\\<");
 
