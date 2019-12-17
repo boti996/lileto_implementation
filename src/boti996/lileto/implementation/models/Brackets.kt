@@ -2,6 +2,9 @@ package boti996.lileto.implementation.models
 
 import boti996.lileto.implementation.parser.BracketType
 import boti996.lileto.implementation.parser.BracketWithContent
+import boti996.lileto.implementation.parser.CommandParser
+import boti996.lileto.implementation.parser.Operation
+import java.lang.IllegalArgumentException
 
 
 fun notSupported() : Nothing = throw IllegalStateException("This operation is not supported")
@@ -13,14 +16,15 @@ fun mustBeImplemented(message: String) : Nothing = throw NotImplementedError(mes
  */
 class Registry {
     private val registry = mutableMapOf<String, Bracket>()
-    /** @param variableName Lileto variable name
+    /** @param variableName Lileto variable's name
      * @return Lileto variable's value */
-    operator fun get(variableName: String) = registry[variableName] ?: mustBeImplemented("Implementation error has occurred")
-    /** @param variableName Lileto variable name
+    operator fun get(variableName: String): Bracket? = registry[variableName]
+    /** @param variableName Lileto variable's name
      * @param bracket Lileto variable's value
      * Register Lileto variable */
-    operator fun set(variableName: String, bracket: Bracket) { registry[variableName] = bracket }
-    /** @param variableName Lileto variable name
+    operator fun set(variableName: String, bracket: Bracket): Bracket = bracket
+        .also { registry[variableName] = bracket }
+    /** @param variableName Lileto variable's name
      * Unregister Lileto variable */
     fun remove(variableName: String) { registry.remove(variableName) }
     /** Used for accessing higher scope registries
@@ -33,7 +37,25 @@ class Registry {
  */
 abstract class Bracket {
     /** Local Lileto registry */
-    protected val localRegistry = Registry()
+    private val localRegistry = Registry()
+    /** Visible registries */
+    private val scopeRegistry = mutableListOf(localRegistry)
+    /** @param scopeRegistry visible registries in current scope
+     * Add registries to [scopeRegistry] field */
+    operator fun plusAssign(scopeRegistry: List<Registry>) { this.scopeRegistry.addAll(scopeRegistry) }
+    /** @param scopeRegistry visible registries in current scope
+     * Add registry to [scopeRegistry] field */
+    operator fun plusAssign(scopeRegistry: Registry) { this.scopeRegistry.add(scopeRegistry) }
+    /** @param variableName Lileto variable's name
+     * @return Lileto variable''s vaue from [scopeRegistry] */
+    operator fun get(variableName: String): Bracket? {
+        scopeRegistry.forEach { registry -> registry[variableName]?.let { return it } }
+        return null
+    }
+    /** @param variableName Lileto variable's name
+     *  @param bracket Lileto variable's value
+     *  Register Lileto variable to [localRegistry] */
+    operator fun set(variableName: String, bracket: Bracket): Bracket = localRegistry.set(variableName, bracket)
 
     /** @return evaluated Lileto code */
     abstract fun evaluate(): String
@@ -42,8 +64,7 @@ abstract class Bracket {
     open fun concatenate(other: Bracket): Bracket = notSupported()
     /** @param other
      * Initialize current object with [other]'s content */
-    open fun assign(other: Bracket): Unit = notSupported()
-
+    open fun assign(other: Bracket): Bracket = notSupported()
     /** @param other
      * @return deep copy of current object's content modified with [other]'s content in a new object */
     open fun insert(other: Bracket): Bracket = notSupported()
@@ -52,7 +73,8 @@ abstract class Bracket {
     abstract fun deepCopy(): Bracket
 
     companion object {
-        /** Global Lileto registry */
+        /** Global Lileto registry
+         *  In current version every variable can be reachable here, but only via bracket namespaces */
         val globalRegistry = Registry()
 
         /** @param bracket
@@ -98,8 +120,9 @@ class LiletoContext(rootContext: BracketWithContent): Bracket() {
             BracketType.TEXT -> TextContext.parse(bracketWithContent)
             BracketType.SPECIAL_CHAR -> TextContext.parse(bracketWithContent)
             BracketType.COMMENT -> null
+            // TODO: add remaining types
             else -> mustBeImplemented("TODO")
-        }
+        }?.also { it += globalRegistry }
 
     companion object {
         /** @param brackets parsed [Bracket]-s
@@ -121,20 +144,116 @@ class TextContext(private var text: String) : Bracket() {
         }
     }
 
-    override fun assign(other: Bracket) {
+    override fun assign(other: Bracket): TextContext {
         text = when (other) {
             is TextContext -> other.text
             else -> notSupported()
         }
+        return this
     }
 
     companion object {
         fun parse(content: BracketWithContent): TextContext = TextContext(content.toString())
     }
-
 }
 
-class CommandContext(): Bracket() {
+data class CommandContext(val name: String, val output: Operation, val operations: List<Operation>): Bracket() {
+    init {
+        if (name.isNotBlank()) {
+            globalRegistry[name] = this
+        }
+    }
+
+    private constructor(result: CommandParser.CommandEvaluationResult): this(result.name, result.output, result.operations)
+
+    override fun evaluate(): String {
+        return if (output.left!!.isNotBlank()) {
+            val outputBracket = output.evaluate()
+            outputBracket.evaluate()
+        } else ""
+    }
+
+    override fun deepCopy(): Bracket {
+        TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
+    }
+
+    // TODO: print the place of exception for user
+    private fun Operation.evaluate(): Bracket {
+        // Operation
+        this@evaluate.op?.let {operator ->
+            // TODO: refactor reduntant parts
+            // Assign value to an existing Lileto variable
+            return if (operator.matches(CommandParser.OperatorTypes.ASSIGN.regex)) {
+
+                val variableToAssign = this@CommandContext[this@evaluate.left ?: mustBeImplemented("Operation's left operand must never be empty here")]
+                    ?: throw IllegalArgumentException("Tried to assign a non-existent variable")
+
+                val assignedValue = this@evaluate.right?.evaluate() ?: mustBeImplemented("Operation's right operand must never be empty here")
+
+                variableToAssign.assign(assignedValue)
+            // Declare a new Lileto variable
+            } else if (operator.matches(CommandParser.OperatorTypes.DECLARE.regex)) {
+                // TODO: type-checking: throws runtime-error in current version
+                val declarationValue = this@evaluate.right?.evaluate() ?: mustBeImplemented("Operation's right operand must never be empty here")
+
+                val variableName = this@evaluate.left ?: mustBeImplemented("Operation's left operand must never be empty here")
+
+                this@CommandContext.set(variableName, declarationValue.deepCopy())
+            // Concatenate Lileto variables
+            } else if (operator.matches(CommandParser.OperatorTypes.CONCATENATE.regex)) {
+                val leftValue = this@CommandContext[this@evaluate.left
+                    ?: mustBeImplemented("Operation's left operand must never be empty here")]
+                    ?: throw IllegalArgumentException("Tried to concatenate to a non-existent variable")
+
+                val rightValue = this@evaluate.right?.evaluate()
+                    ?: mustBeImplemented("Operation's right operand must never be empty here")
+                    ?: throw IllegalArgumentException("Tried to concatenate a non-existent variable")
+
+                leftValue.concatenate(rightValue)
+            // Insert into Lileto variable
+            } else if (operator.matches(CommandParser.OperatorTypes.INSERT.regex)) {
+                val leftValue =  this@CommandContext[this@evaluate.left ?: mustBeImplemented("Operation's left operand must never be empty here")]
+                    ?: throw IllegalArgumentException("Tried to concatenate to a non-existent variable")
+
+                val rightValue = this@evaluate.right?.evaluate() ?: mustBeImplemented("Operation's right operand must never be empty here")
+                ?: throw IllegalArgumentException("Tried to concatenate a non-existent variable")
+
+                leftValue.insert(rightValue)
+            } else mustBeImplemented("There should not be unknown operators in the pre-parsed content")
+        }
+        // Single value NOTE: unary operators might come here in the future
+        return this@CommandContext[this@evaluate.left ?: mustBeImplemented("TODO")]
+            ?: throw IllegalArgumentException("Tried to get non-existent variable")
+    }
+
+    companion object {
+        fun parse(command: BracketWithContent): CommandContext {
+            val commandContext = CommandContext(CommandParser.evaluateCommands(command))
+            // Create inner brackets
+            command.content.forEach { content ->
+                if (content is BracketWithContent) {
+
+                    commandContext[content.getTemporaryRegistryName()] =
+                        when (content.bracket) {
+                            BracketType.TEXT -> TextContext.parse(content)
+                            BracketType.COMMAND -> parse(content)
+                            BracketType.CONTAINER -> ContainerContext.parse(content)
+                            BracketType.TEMPLATE -> TextContext.parse(content)
+                            else -> notSupported()
+                        }
+                            // Register inner brackets into local registry
+                            .also { bracket -> commandContext[content.getTemporaryRegistryName()] = bracket }
+                    }
+                }
+            return commandContext
+            }
+    }
+}
+
+class ContainerContext(): Bracket() {
+    init {
+
+    }
     override fun evaluate(): String {
         TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
     }
@@ -147,16 +266,6 @@ class CommandContext(): Bracket() {
         fun parse(content: BracketWithContent): CommandContext {
             TODO()
         }
-    }
-}
-
-class ContainerContext(): Bracket() {
-    override fun evaluate(): String {
-        TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
-    }
-
-    override fun deepCopy(): Bracket {
-        TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
     }
 }
 

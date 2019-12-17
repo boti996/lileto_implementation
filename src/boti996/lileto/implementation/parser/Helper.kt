@@ -112,6 +112,8 @@ data class BracketWithContent(val bracket: BracketType, var content: MutableList
                     if (isClosed) close() else ""
     }
 
+    fun getTemporaryRegistryName() = "_${this.hashCode()}"
+
     companion object {
         // values used for special char bracket evaluation
         private val sortedForRegex = SpecialCharacter.values()

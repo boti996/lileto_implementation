@@ -23,7 +23,9 @@ object CommandParser {
         ASSIGN("\\="),
         DECLARE("\\:$ws${word("type", true)}$ws\\="),
         CONCATENATE("\\+"),
-        INSERT("\\<")
+        INSERT("\\<");
+
+        val regex = Regex(this.pattern)
     }
     // Regex building patterns
     private fun word(name: String = "", canBeBlank: Boolean = false)
@@ -57,7 +59,9 @@ object CommandParser {
     private fun evaluateNameOutput(input: String): NameOutputEvaluationResult {
         val fullCommandPattern = Regex("$name(.*)$fullOperation$output")
 
-        println(input)
+//        println(input)
+        // TODO: test cases when there's no name or output
+        // TODO: output's right side should be an operation
         val result = fullCommandPattern.find(input) ?: throw IllegalArgumentException() // TODO: full check before
 
         val nameGroup = result.groups[1]
@@ -69,7 +73,7 @@ object CommandParser {
             .take(beginOfOutput)
             .takeLast((input.length-1) - endOfName)
 
-        return NameOutputEvaluationResult(CommandEvaluationResult(nameGroup.value, outputGroup.value), trimmedInput)
+        return NameOutputEvaluationResult(CommandEvaluationResult(nameGroup.value, Operation(left = outputGroup.value)), trimmedInput)
     }
 
     // Indices used during parsing
@@ -95,11 +99,11 @@ object CommandParser {
             val rightmostOperand = groups[GroupIndex.OP_RIGHT.value]?.value ?: break
             while (rightmostOperand.isNotBlank()) {
                 // Register operation
-                val rightmostOperation = Operation(groups[GroupIndex.OPERATOR.value]?.value ?: break, null, null)
+                val rightmostOperation = Operation(op = groups[GroupIndex.OPERATOR.value]?.value ?: break)
                 // Found the very last operand
                 if (operandParsingStack.empty()) {
                     // Register right operand
-                    rightmostOperation.right = Operation(null, groups[GroupIndex.OP_RIGHT.value]?.value ?: break, null)
+                    rightmostOperation.right = Operation(left =groups[GroupIndex.OP_RIGHT.value]?.value ?: break)
                     // Otherwise
                 } else {
                     // Register previous operation's left operand
@@ -125,8 +129,9 @@ object CommandParser {
             }
             // Register assign operation
             parsedOperations.add(
-                Operation(groups[GroupIndex.ASSIGN.value]?.value ?: break, groups[GroupIndex.VAR.value]?.value ?: break,
-                    operandParsingStack.lastOrNull()))
+                Operation(op = groups[GroupIndex.ASSIGN.value]?.value ?: break,
+                    left = groups[GroupIndex.VAR.value]?.value ?: break,
+                    right = operandParsingStack.lastOrNull()))
             // Trim current operation
             input = input.take(currentOperation.groups[1]?.range?.first ?: break)
             //
@@ -140,14 +145,14 @@ object CommandParser {
     }
 
     // Enclosed return values
-    data class CommandEvaluationResult(val name: String, val output: String, var operations: MutableList<Operation> = mutableListOf())
+    data class CommandEvaluationResult(val name: String, val output: Operation, var operations: MutableList<Operation> = mutableListOf())
     /** @return evaluated lance of operations */
     fun evaluateCommands(command: BracketWithContent): CommandEvaluationResult {
         if (command.bracket != COMMAND) throw TODO("This should be a command bracket")
 
         // Create a string. If there are brackets in it, use "_${object hash code}" as their Lileto variable name mock
         val originalInput = command.content
-            .joinToString("") { if(it is BracketWithContent) "_${it.hashCode()}" else it.toString() } // TODO: check it's correctness in practice
+            .joinToString("") { if(it is BracketWithContent) it.getTemporaryRegistryName() else it.toString() } // TODO: check it's correctness in practice
 
         try {
             return evaluateOperations(evaluateNameOutput(originalInput))
